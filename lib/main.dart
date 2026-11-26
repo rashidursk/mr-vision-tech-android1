@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
@@ -29,12 +32,14 @@ class _ERPState extends State<ERP> {
   static const names=['Royal Blue','Emerald Green','Midnight Dark','Luxury Gold','Ocean Teal','Premium Purple','Crimson Red','Minimal White'];
   static const colors=[0xff1759d1,0xff059669,0xff818cf8,0xffb58b22,0xff0891b2,0xff8b5cf6,0xffe11d48,0xff475569];
   Future<void> save(String k,String v) async {await widget.db.insert('preferences',{'k':k,'v':v},conflictAlgorithm:ConflictAlgorithm.replace);if(mounted)setState(()=>widget.settings[k]=v);}
-  @override Widget build(BuildContext context){final i=(int.tryParse(widget.settings['theme']??'0')??0).clamp(0,7).toInt();final dark=widget.settings['dark']=='1'||i==2||i==3;final scheme=ColorScheme.fromSeed(seedColor:Color(colors[i]),brightness:dark?Brightness.dark:Brightness.light);return MaterialApp(debugShowCheckedModeBanner:false,title:'MR Vision Tech',theme:ThemeData(useMaterial3:true,colorScheme:scheme,cardTheme:CardThemeData(margin:const EdgeInsets.symmetric(vertical:5),shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(20)))),home:Home(db:widget.db,dark:dark,toggle:()=>save('dark',dark?'0':'1'),settings:widget.settings,save:save));}
+  Future<void> reloadSettings() async {final rows=await widget.db.query('preferences');if(mounted)setState((){widget.settings.clear();widget.settings.addAll({for(final r in rows) r['k'] as String:r['v'] as String});});}
+  @override Widget build(BuildContext context){final i=(int.tryParse(widget.settings['theme']??'0')??0).clamp(0,7).toInt();final dark=widget.settings['dark']=='1'||i==2||i==3;final scheme=ColorScheme.fromSeed(seedColor:Color(colors[i]),brightness:dark?Brightness.dark:Brightness.light);return MaterialApp(debugShowCheckedModeBanner:false,title:'MR Vision Tech',theme:ThemeData(useMaterial3:true,colorScheme:scheme,cardTheme:CardThemeData(margin:const EdgeInsets.symmetric(vertical:5),shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(20)))),home:Home(db:widget.db,dark:dark,toggle:()=>save('dark',dark?'0':'1'),settings:widget.settings,save:save,reloadSettings:reloadSettings));}
 
 }
 class Home extends StatefulWidget {
  final Database db; final bool dark; final VoidCallback toggle; final Map<String,String> settings; final Future<void> Function(String,String) save;
- const Home({super.key,required this.db,required this.dark,required this.toggle,required this.settings,required this.save});
+ final Future<void> Function() reloadSettings;
+ const Home({super.key,required this.db,required this.dark,required this.toggle,required this.settings,required this.save,required this.reloadSettings});
  @override State<Home> createState()=>_HomeState();
 }
 class _HomeState extends State<Home> {
@@ -66,7 +71,9 @@ class _HomeState extends State<Home> {
  List<Map<String,Object?>> products=[],clients=[],sales=[]; final Map<int,int> cart={};
  @override void initState(){super.initState(); refresh();}
  Future<void> refresh() async {final a=await widget.db.query('products',orderBy:'name');final b=await widget.db.query('clients',orderBy:'name');final c=await widget.db.query('sales',orderBy:'id DESC');if(mounted)setState((){products=a;clients=b;sales=c;});}
- void go(int i)=>setState((){tab=i;search='';});
+ final List<int> history=[];
+ void go(int i){if(i==tab)return;setState((){if(i==0){history.clear();}else{history.add(tab);}tab=i;search='';});}
+ void back(){if(tab==0){_confirmExit();return;}setState((){tab=history.isEmpty?0:history.removeLast();search='';});}
  void message(String s){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(s)));}
  double total(Map<String,Object?> r,int q)=>(r['price'] as num).toDouble()*q*(1+(r['gst'] as num)/100);
  double get cartTotal=>products.fold(0.0,(s,r)=>s+total(r,cart[r['id']]??0));
@@ -82,15 +89,20 @@ class _HomeState extends State<Home> {
  final subtotal=lines.fold<double>(0,(a,l)=>a+(l['price'] as num)*(l['qty'] as num));
  final grand=(r['total'] as num).toDouble();
  final doc=pw.Document();
+ final template=(int.tryParse(widget.settings['invoice_template']??'0')??0).clamp(0,5).toInt();
+ final accent=[PdfColors.black,PdfColors.grey800,PdfColors.grey700,PdfColors.blue900,PdfColor.fromInt(0xff94742c),PdfColors.teal800][template];
+ final classic=template<3;
+ final ink=classic?PdfColors.black:PdfColors.white;
+ final band=classic?PdfColors.grey200:accent;
  final logo=pw.MemoryImage((await rootBundle.load('assets/logo.png')).buffer.asUint8List());
  final cfg=widget.settings;
  final upi=cfg['upi']??'';
  final qr=Uri(scheme:'upi',host:'pay',queryParameters:{'pa':upi,'pn':cfg['business']??'MR Vision Tech','am':grand.toStringAsFixed(2),'cu':'INR','tn':'Invoice ${r['number']}'}).toString();
- doc.addPage(pw.MultiPage(build:(_)=>[
- pw.Container(padding:const pw.EdgeInsets.all(20),color:PdfColors.blue900,child:pw.Row(mainAxisAlignment:pw.MainAxisAlignment.spaceBetween,children:[pw.Image(logo,width:44,height:44),pw.Expanded(child:pw.Text(cfg['business']??'MR Vision Tech',style:pw.TextStyle(color:PdfColors.white,fontSize:22,fontWeight:pw.FontWeight.bold))),pw.Text('INVOICE',style:const pw.TextStyle(color:PdfColors.white,fontSize:16))])),
+ doc.addPage(pw.MultiPage(pageFormat:PdfPageFormat.a4,margin:const pw.EdgeInsets.all(10*PdfPageFormat.mm),footer:(ctx)=>pw.Align(alignment:pw.Alignment.centerRight,child:pw.Text('Page ${ctx.pageNumber} / ${ctx.pagesCount}',style:const pw.TextStyle(fontSize:9))),build:(_)=>[
+ pw.Container(padding:pw.EdgeInsets.all(template==2?8:16),color:band,child:pw.Row(mainAxisAlignment:pw.MainAxisAlignment.spaceBetween,children:[pw.Image(logo,width:44,height:44),pw.Expanded(child:pw.Text(cfg['business']??'MR Vision Tech',style:pw.TextStyle(color:ink,fontSize:22,fontWeight:pw.FontWeight.bold))),pw.Text('INVOICE',style:pw.TextStyle(color:ink,fontSize:16))])),
  pw.SizedBox(height:8),pw.Text(cfg['address']??''),pw.Text(cfg['phone']??''),if((cfg['gstin']??'').isNotEmpty)pw.Text('GSTIN: ${cfg['gstin']}'),pw.SizedBox(height:12),pw.Text('Invoice: ${r['number']}'),pw.Text('Date: ${DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.parse(r['date'] as String))}'),pw.SizedBox(height:12),pw.Text('BILL TO',style:pw.TextStyle(fontWeight:pw.FontWeight.bold)),pw.Text('${r['customer']}'),pw.SizedBox(height:20),
- pw.TableHelper.fromTextArray(headerDecoration:const pw.BoxDecoration(color:PdfColors.blue900),headerStyle:const pw.TextStyle(color:PdfColors.white),headers:['Item','Qty','Rate','GST %','Amount'],data:lines.map((l)=>[l['name'],l['qty'],(l['price'] as num).toStringAsFixed(2),l['gst'],total(l,l['qty'] as int).toStringAsFixed(2)]).toList()),
- pw.SizedBox(height:20),pw.Align(alignment:pw.Alignment.centerRight,child:pw.Column(crossAxisAlignment:pw.CrossAxisAlignment.end,children:[pw.Text('Subtotal: INR ${subtotal.toStringAsFixed(2)}'),pw.Text('GST: INR ${(grand-subtotal).toStringAsFixed(2)}'),pw.SizedBox(height:8),pw.Text('TOTAL: INR ${grand.toStringAsFixed(2)}',style:pw.TextStyle(fontSize:18,fontWeight:pw.FontWeight.bold))])),pw.SizedBox(height:30),pw.Divider(),if(upi.contains('@')&&grand>0&&cfg['qr']!='0')pw.Row(children:[pw.BarcodeWidget(barcode:pw.Barcode.qrCode(),data:qr,width:90,height:90),pw.SizedBox(width:12),pw.Expanded(child:pw.Text('Scan to pay via UPI\n$upi\nVerify outstanding amount before payment'))]),if((cfg['terms']??'').isNotEmpty)...[pw.SizedBox(height:12),pw.Text('TERMS & CONDITIONS',style:pw.TextStyle(fontWeight:pw.FontWeight.bold)),pw.Text(cfg['terms']!)],pw.SizedBox(height:20),pw.Text('Thank you for your business.') ]));
+ pw.TableHelper.fromTextArray(headerDecoration:pw.BoxDecoration(color:band),headerStyle:pw.TextStyle(color:ink,fontWeight:pw.FontWeight.bold),cellPadding:pw.EdgeInsets.all(template==2?3:7),headers:template==1?['Item','Qty','Rate','Taxable','GST %','Tax','Total']:['Item','Qty','Rate','GST %','Amount'],data:lines.map((l)=>template==1?[l['name'],l['qty'],(l['price'] as num).toStringAsFixed(2),((l['price'] as num)*(l['qty'] as num)).toStringAsFixed(2),l['gst'],((l['price'] as num)*(l['qty'] as num)*(l['gst'] as num)/100).toStringAsFixed(2),total(l,l['qty'] as int).toStringAsFixed(2)]:[l['name'],l['qty'],(l['price'] as num).toStringAsFixed(2),l['gst'],total(l,l['qty'] as int).toStringAsFixed(2)]).toList()),
+ pw.SizedBox(height:20),pw.Align(alignment:pw.Alignment.centerRight,child:pw.Column(crossAxisAlignment:pw.CrossAxisAlignment.end,children:[pw.Text('Subtotal: INR ${subtotal.toStringAsFixed(2)}'),pw.Text('GST: INR ${(grand-subtotal).toStringAsFixed(2)}'),pw.SizedBox(height:8),pw.Text('TOTAL: INR ${grand.toStringAsFixed(2)}',style:pw.TextStyle(fontSize:18,fontWeight:pw.FontWeight.bold))])),pw.SizedBox(height:30),pw.Divider(),if(upi.contains('@')&&grand>0&&cfg['qr']!='0')pw.Row(children:[pw.BarcodeWidget(barcode:pw.Barcode.qrCode(),data:qr,width:90,height:90),pw.SizedBox(width:12),pw.Expanded(child:pw.Text('Scan to pay via UPI\n$upi\nVerify outstanding amount before payment'))]),if((cfg['terms']??'').isNotEmpty)...[pw.SizedBox(height:12),pw.Text('TERMS & CONDITIONS',style:pw.TextStyle(fontWeight:pw.FontWeight.bold)),pw.Text(cfg['terms']!)],pw.SizedBox(height:20),pw.Align(alignment:pw.Alignment.centerRight,child:pw.Text('Authorized Signatory')),pw.Text('Thank you for your business.') ]));
  final bytes=await doc.save();if(!mounted)return;
  await Navigator.of(context).push(MaterialPageRoute<void>(builder:(_)=>Scaffold(appBar:AppBar(title:Text('${r['number']}')),body:PdfPreview(build:(_) async=>bytes,pdfFileName:'${r['number']}.pdf',canChangePageFormat:false,canChangeOrientation:false))));
  }catch(e){message('PDF error: $e');}}
@@ -103,7 +115,7 @@ class _HomeState extends State<Home> {
  Widget searchBox()=>TextField(key:ValueKey(tab),onChanged:(s)=>setState(()=>search=s.toLowerCase()),decoration:InputDecoration(prefixIcon:const Icon(Icons.search),hintText:'Search records',filled:true,border:OutlineInputBorder(borderRadius:BorderRadius.circular(18),borderSide:BorderSide.none)));
  List<Widget> records(bool product){final rows=product?products:clients;final filtered=rows.where((r)=>r.values.join(' ').toLowerCase().contains(search)&&(!product||((category=='All'||r['category']==category)&&(!lowOnly||(r['qty'] as int)<=5))));return [heading(product?'Inventory':'Customers',product?'Manage products and stock':'Manage customer relationships'),const SizedBox(height:16),searchBox(),if(product) Wrap(spacing:8,children:[FilterChip(label:const Text('Low stock'),selected:lowOnly,onSelected:(v)=>setState(()=>lowOnly=v)),DropdownButton<String>(value:category,items:{'All',...products.map((r)=>(r['category']??'General').toString()),category}.map((v)=>DropdownMenuItem(value:v,child:Text(v.isEmpty?'Uncategorized':v))).toList(),onChanged:(v)=>setState(()=>category=v??'All'))]),const SizedBox(height:12),FilledButton.icon(onPressed:()=>edit(product),icon:const Icon(Icons.add),label:Text(product?'Add product':'Add customer')),if(filtered.isEmpty)const Padding(padding:EdgeInsets.all(32),child:Center(child:Text('No records found'))),...filtered.map((r)=>Card(elevation:0,child:ListTile(leading:CircleAvatar(child:Icon(product?Icons.inventory_2_outlined:Icons.person_outline)),title:Text('${r['name']}'),subtitle:Text(product?'${r['code']} • ${r['qty']} in stock • ${r['category']??'General'}':'${r['phone']} • ${r['address']}'),onTap:()=>edit(product,r),trailing:product?Column(mainAxisAlignment:MainAxisAlignment.center,children:[Text(money(r['price'] as num)),if((r['qty'] as int)<=5)const Text('LOW STOCK',style:TextStyle(color:Colors.orange,fontSize:10,fontWeight:FontWeight.bold))]):const Icon(Icons.edit_outlined))))];}
  List<Widget> pos()=>[heading('New sale','Select products and review your cart'),const SizedBox(height:16),DropdownButtonFormField<int>(value:client,decoration:const InputDecoration(labelText:'Customer',border:OutlineInputBorder()),items:[const DropdownMenuItem<int>(value:null,child:Text('Walk-in customer')),...clients.map((r)=>DropdownMenuItem<int>(value:r['id'] as int,child:Text('${r['name']}')))],onChanged:busy?null:(v)=>setState(()=>client=v)),const SizedBox(height:12),searchBox(),if(products.isEmpty)TextButton(onPressed:()=>go(1),child:const Text('Add products first')),...products.where((r)=>r.values.join(' ').toLowerCase().contains(search)).map((r){final id=r['id'] as int;final q=cart[id]??0;return Card(elevation:0,child:ListTile(title:Text('${r['name']}'),subtitle:Text('${money(r['price'] as num)} + ${r['gst']}% GST'),trailing:Row(mainAxisSize:MainAxisSize.min,children:[IconButton(onPressed:busy||q==0?null:()=>setState(()=>cart[id]=q-1),icon:const Icon(Icons.remove_circle_outline)),Text('$q'),IconButton(onPressed:busy||q>=(r['qty'] as int)?null:()=>setState(()=>cart[id]=q+1),icon:const Icon(Icons.add_circle))])));}),const SizedBox(height:16),Text('Cart total  ${money(cartTotal)}',style:Theme.of(context).textTheme.titleLarge),FilledButton.icon(onPressed:busy||!cart.values.any((q)=>q>0)?null:checkout,icon:const Icon(Icons.check),label:const Text('Save invoice'))];
- @override Widget build(BuildContext context){final pages=[dashboard,()=>records(true),pos,()=>[heading('Invoices','Search, preview or share invoices'),const SizedBox(height:12),searchBox(),...sales.where((r)=>r.values.join(' ').toLowerCase().contains(search)).map(saleTile)],()=>[heading('Settings','MR Vision Tech'),ListTile(leading:const Icon(Icons.people_outline),title:const Text('Customers'),onTap:()=>go(5)),ListTile(leading:const Icon(Icons.palette_outlined),title:const Text('Appearance & Themes'),onTap:()=>Navigator.of(context).push(MaterialPageRoute<void>(builder:(_)=>ThemePage(settings:widget.settings,save:widget.save)))),ListTile(leading:const Icon(Icons.business),title:const Text('Business & Invoice Settings'),onTap:()=>Navigator.of(context).push(MaterialPageRoute<void>(builder:(_)=>ConfigPage(settings:widget.settings,save:widget.save)))),SwitchListTile(title:const Text('Dark mode'),value:widget.dark,onChanged:(_)=>widget.toggle()),ListTile(leading:const Icon(Icons.info_outline),title:const Text('About ERP'),subtitle:const Text('MR Vision Tech • Offline edition 3.1.0'),onTap:()=>Navigator.of(context).push(MaterialPageRoute<void>(builder:(_)=>const DeveloperAboutPage())))],()=>records(false)];return PopScope<Object?>(canPop:false,onPopInvokedWithResult:(didPop,result){if(!didPop)_confirmExit();},child:Scaffold(appBar:AppBar(backgroundColor:Theme.of(context).colorScheme.primary,foregroundColor:Theme.of(context).colorScheme.onPrimary,title:Row(children:[ClipRRect(borderRadius:BorderRadius.circular(8),child:Image.asset('assets/logo.png',width:40,height:40)),const SizedBox(width:12),const Text('MR Vision Tech',style:TextStyle(fontWeight:FontWeight.bold))]),actions:[IconButton(onPressed:()=>go(5),icon:const Icon(Icons.people_outline),tooltip:'Customers')]),body:SafeArea(child:ListView(key:ValueKey(tab),padding:const EdgeInsets.all(16),children:pages[tab]())),bottomNavigationBar:NavigationBar(selectedIndex:tab==5?4:tab,onDestinationSelected:go,destinations:const [NavigationDestination(icon:Icon(Icons.dashboard_outlined),label:'Home'),NavigationDestination(icon:Icon(Icons.inventory_2_outlined),label:'Stock'),NavigationDestination(icon:Icon(Icons.shopping_cart_outlined),label:'POS'),NavigationDestination(icon:Icon(Icons.receipt_long_outlined),label:'Sales'),NavigationDestination(icon:Icon(Icons.settings_outlined),label:'More')])));}
+ @override Widget build(BuildContext context){final pages=[dashboard,()=>records(true),pos,()=>[heading('Invoices','Search, preview or share invoices'),const SizedBox(height:12),searchBox(),...sales.where((r)=>r.values.join(' ').toLowerCase().contains(search)).map(saleTile)],()=>[heading('Settings','MR Vision Tech'),ListTile(leading:const Icon(Icons.people_outline),title:const Text('Customers'),onTap:()=>go(5)),ListTile(leading:const Icon(Icons.palette_outlined),title:const Text('Appearance & Themes'),onTap:()=>Navigator.of(context).push(MaterialPageRoute<void>(builder:(_)=>ThemePage(settings:widget.settings,save:widget.save)))),ListTile(leading:const Icon(Icons.business),title:const Text('Business & Invoice Settings'),onTap:()=>Navigator.of(context).push(MaterialPageRoute<void>(builder:(_)=>ConfigPage(settings:widget.settings,save:widget.save)))),ListTile(leading:const Icon(Icons.description_outlined),title:const Text('Invoice Templates (A4)'),onTap:() async {final choice=await showDialog<int>(context:context,builder:(ctx)=>SimpleDialog(title:const Text('Select A4 template'),children:List.generate(6,(i)=>SimpleDialogOption(onPressed:()=>Navigator.pop(ctx,i),child:Text(['Tally Classic','Tally GST Detailed','Tally Compact','Corporate Blue','Premium Gold','Modern Professional'][i])))));if(choice!=null)await widget.save('invoice_template',choice.toString());}),ListTile(leading:const Icon(Icons.backup_outlined),title:const Text('Backup & Restore'),subtitle:const Text('Export or restore business data'),onTap:() async {await Navigator.of(context).push(MaterialPageRoute<void>(builder:(_)=>BackupPage(db:widget.db,onRestored:() async {cart.clear();client=null;category='All';lowOnly=false;await widget.reloadSettings();await refresh();})));}),SwitchListTile(title:const Text('Dark mode'),value:widget.dark,onChanged:(_)=>widget.toggle()),ListTile(leading:const Icon(Icons.info_outline),title:const Text('About ERP'),subtitle:const Text('MR Vision Tech • Offline edition 3.2.1'),onTap:()=>Navigator.of(context).push(MaterialPageRoute<void>(builder:(_)=>const DeveloperAboutPage())))],()=>records(false)];return PopScope<Object?>(canPop:false,onPopInvokedWithResult:(didPop,result){if(!didPop)back();},child:Scaffold(appBar:AppBar(backgroundColor:Theme.of(context).colorScheme.primary,foregroundColor:Theme.of(context).colorScheme.onPrimary,title:Row(children:[ClipRRect(borderRadius:BorderRadius.circular(8),child:Image.asset('assets/logo.png',width:40,height:40)),const SizedBox(width:12),const Text('MR Vision Tech',style:TextStyle(fontWeight:FontWeight.bold))]),actions:[IconButton(onPressed:()=>go(5),icon:const Icon(Icons.people_outline),tooltip:'Customers')]),body:SafeArea(child:ListView(key:ValueKey(tab),padding:const EdgeInsets.all(16),children:pages[tab]())),bottomNavigationBar:NavigationBar(selectedIndex:tab==5?4:tab,onDestinationSelected:go,destinations:const [NavigationDestination(icon:Icon(Icons.dashboard_outlined),label:'Home'),NavigationDestination(icon:Icon(Icons.inventory_2_outlined),label:'Stock'),NavigationDestination(icon:Icon(Icons.shopping_cart_outlined),label:'POS'),NavigationDestination(icon:Icon(Icons.receipt_long_outlined),label:'Sales'),NavigationDestination(icon:Icon(Icons.settings_outlined),label:'More')])));}
 }
 
 class _RecordDialog extends StatefulWidget {
@@ -161,10 +173,102 @@ class DeveloperAboutPage extends StatelessWidget {
    const SizedBox(height:24),
    Center(child:Image.asset('assets/logo.png',width:64,height:64)),
    const SizedBox(height:8),
-   const Text('MR Vision Tech • Offline Edition 3.1.0',textAlign:TextAlign.center),
+   const Text('MR Vision Tech • Offline Edition 3.2.1',textAlign:TextAlign.center),
    const SizedBox(height:12),
    const Text('Developed by MR VisionTech: Rashidur Rahman',textAlign:TextAlign.center),
    const Text('© 2026 MR Vision Tech',textAlign:TextAlign.center),
   ])));
  }
+}
+
+
+class BackupPage extends StatefulWidget {
+  final Database db;
+  final Future<void> Function() onRestored;
+  const BackupPage({super.key, required this.db, required this.onRestored});
+  @override State<BackupPage> createState()=>_BackupPageState();
+}
+class _BackupPageState extends State<BackupPage> {
+  static const columns=<String,List<String>>{
+    'products':['id','code','name','price','qty','gst','cost','category','barcode'],
+    'clients':['id','name','phone','address'],
+    'sales':['id','number','date','customer','total'],
+    'lines':['id','sale','name','qty','price','gst','cost'],
+    'preferences':['k','v'],
+  };
+  bool busy=false;
+  String status='';
+  Future<void> run(Future<void> Function() action) async {
+    if(busy)return;
+    setState((){busy=true;status='';});
+    try {await action();} catch(e){if(mounted)setState(()=>status='Operation failed: $e');}
+    finally {if(mounted)setState(()=>busy=false);}
+  }
+  Future<bool> exportBackup() async {
+    final tables=await widget.db.transaction((tx) async {
+      final data=<String,Object?>{};
+      for(final table in columns.keys){data[table]=await tx.query(table);}
+      return data;
+    });
+    final bytes=Uint8List.fromList(utf8.encode(jsonEncode({'format':'mr-vision-tech-backup','schema':2,'created':DateTime.now().toIso8601String(),'tables':tables})));
+    final path=await FilePicker.platform.saveFile(dialogTitle:'Save backup outside the app',fileName:'MR_Vision_Tech_Backup_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.json',type:FileType.custom,allowedExtensions:['json'],bytes:bytes);
+    if(mounted)setState(()=>status=path==null?'Backup cancelled':'Backup exported. Keep this file in Downloads or another safe folder.');
+    return path!=null;
+  }
+  Map<String,List<Map<String,Object?>>> validate(Object? raw){
+    if(raw is! Map || raw['format']!='mr-vision-tech-backup'||raw['schema']!=2||raw['tables'] is! Map){throw const FormatException('Unsupported backup format');}
+    final tables=raw['tables'] as Map;
+    final result=<String,List<Map<String,Object?>>>{};
+    for(final entry in columns.entries){
+      final rows=tables[entry.key];
+      if(rows is! List)throw FormatException('Missing table: ${entry.key}');
+      final records=<Map<String,Object?>>[];
+      final ids=<Object?>{};
+      for(final row in rows){
+        if(row is! Map || row.length!=entry.value.length || !entry.value.every((c)=>row.containsKey(c)))throw FormatException('Invalid columns: ${entry.key}');
+        final record=Map<String,Object?>.from(row);
+        for(final c in entry.value){
+          final v=record[c];
+          if(['id','sale','qty'].contains(c)){if(v is! int || v<(c=='qty'?0:1))throw FormatException('Invalid $c');}
+          else if(['price','gst','cost','total'].contains(c)){if(v==null&&c=='cost')continue;if(v is! num||!v.isFinite||v<0||(c=='gst'&&v>100))throw FormatException('Invalid $c');}
+          else if(v is! String && !(v==null&&['phone','address','category','barcode'].contains(c)))throw FormatException('Invalid $c');
+        }
+        if(!ids.add(record[entry.key=='preferences'?'k':'id']))throw const FormatException('Duplicate record');
+        if(entry.key=='sales'&&DateTime.tryParse(record['date'] as String)==null)throw const FormatException('Invalid invoice date');
+        records.add(record);
+      }
+      result[entry.key]=records;
+    }
+    final saleIds=result['sales']!.map((r)=>r['id']).toSet();
+    if(result['lines']!.any((r)=>!saleIds.contains(r['sale'])))throw const FormatException('Invoice lines without invoice');
+    return result;
+  }
+  Future<void> restore() async {
+    final picked=await FilePicker.platform.pickFiles(type:FileType.custom,allowedExtensions:['json'],withData:true);
+    if(picked==null)return;
+    final bytes=picked.files.single.bytes;
+    if(bytes==null)throw const FormatException('Cannot read backup');
+    final data=validate(jsonDecode(utf8.decode(bytes)));
+    if(!mounted)return;
+    final confirmed=await showDialog<bool>(context:context,builder:(ctx)=>AlertDialog(title:const Text('Replace current data?'),content:Text('Backup contains ${data['products']!.length} products, ${data['clients']!.length} customers and ${data['sales']!.length} invoices. Current records will be replaced, not merged. A safety backup must be saved first.'),actions:[TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('Cancel')),FilledButton(onPressed:()=>Navigator.pop(ctx,true),child:const Text('Continue'))]));
+    if(confirmed!=true||!mounted)return;
+    if(!await exportBackup())return;
+    await widget.db.transaction((tx) async {
+      for(final table in columns.keys.toList().reversed){await tx.delete(table);}
+      for(final table in columns.keys){for(final row in data[table]!){await tx.insert(table,row);}}
+    });
+    await widget.onRestored();
+    if(mounted)setState(()=>status='Restore completed successfully.');
+  }
+  @override Widget build(BuildContext context)=>PopScope<Object?>(canPop:!busy,child:Scaffold(appBar:AppBar(title:const Text('Backup & Restore')),body:ListView(padding:const EdgeInsets.all(16),children:[
+    const Text('Protect your business data',style:TextStyle(fontSize:22,fontWeight:FontWeight.bold)),
+    const SizedBox(height:12),
+    const Text('Backups contain private business and customer data. Save outside app storage and keep them secure. Export before uninstalling.'),
+    const SizedBox(height:20),
+    FilledButton.icon(onPressed:busy?null:()=>run(() async {await exportBackup();}),icon:const Icon(Icons.backup),label:const Text('Create & Save Backup')),
+    OutlinedButton.icon(onPressed:busy?null:()=>run(restore),icon:const Icon(Icons.restore),label:const Text('Restore Backup')),
+    if(busy)const LinearProgressIndicator(),
+    if(status.isNotEmpty)Padding(padding:const EdgeInsets.only(top:16),child:Text(status)),
+    const SizedBox(height:16),const Text('Backup format: MR Vision Tech JSON. Includes products, customers, invoices, invoice lines and settings. Restore replaces existing records.')
+  ])));
 }
