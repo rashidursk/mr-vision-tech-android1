@@ -1,0 +1,38 @@
+name: Build MR Vision Tech APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Verify ERP source
+        run: |
+          grep -Fq "class ERP extends StatefulWidget" lib/main.dart
+          grep -Fq "package:flutter/material.dart" lib/main.dart
+          sha256sum lib/main.dart pubspec.yaml > /tmp/erp-source.sha256
+      - name: Generate Android scaffold
+        run: |
+          flutter create --platforms=android --org com.mrvisiontech --project-name mr_vision_tech /tmp/mr_vision_tech
+          test ! -d android || rm -rf android
+          cp -r /tmp/mr_vision_tech/android .
+          sed -i 's/android:label="mr_vision_tech"/android:label="MR Vision Tech"/' android/app/src/main/AndroidManifest.xml
+      - name: Verify source unchanged
+        run: sha256sum -c /tmp/erp-source.sha256
+      - run: flutter pub get
+      - run: flutter analyze --no-fatal-infos --no-fatal-warnings
+      - run: flutter build apk --debug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MR-Vision-Tech-APK
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error

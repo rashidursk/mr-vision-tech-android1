@@ -1,0 +1,16 @@
+name: mr_vision_tech
+description: Offline business ERP
+publish_to: none
+version: 1.0.0+1
+environment:
+  sdk: '>=3.5.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  sqflite: ^2.4.2
+  path: ^1.9.0
+  intl: ^0.20.2
+  pdf: ^3.11.3
+  printing: ^5.14.2
+flutter:
+  uses-material-design: true
