@@ -1,7 +1,7 @@
 name: mr_vision_tech
 description: Offline business ERP
 publish_to: none
-version: 3.2.3+8
+version: 3.3.0+9
 environment:
   sdk: '>=3.5.0 <4.0.0'
 dependencies:
