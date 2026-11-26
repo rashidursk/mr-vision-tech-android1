@@ -1,7 +1,7 @@
 name: mr_vision_tech
 description: Offline business ERP
 publish_to: none
-version: 3.2.1+6
+version: 3.2.2+7
 environment:
   sdk: '>=3.5.0 <4.0.0'
 dependencies:
@@ -27,11 +27,11 @@ flutter_launcher_icons:
   ios: false
   image_path: assets/logo.png
   adaptive_icon_background: '#FFFFFF'
-  adaptive_icon_foreground: assets/logo.png
+  adaptive_icon_foreground: assets/branding_safe.png
 flutter_native_splash:
   color: '#FFFFFF'
   image: assets/logo.png
   android_12:
     color: '#FFFFFF'
-    image: assets/logo.png
+    image: assets/branding_safe.png
   ios: false
