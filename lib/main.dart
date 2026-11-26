@@ -38,6 +38,30 @@ class Home extends StatefulWidget {
  @override State<Home> createState()=>_HomeState();
 }
 class _HomeState extends State<Home> {
+ bool _exitDialogOpen = false;
+ Future<void> _confirmExit() async {
+   if (_exitDialogOpen || !mounted) return;
+   _exitDialogOpen = true;
+   try {
+     final exit = await showDialog<bool>(
+       context: context,
+       barrierDismissible: false,
+       builder: (dialogContext) => AlertDialog(
+         icon: const Icon(Icons.exit_to_app),
+         title: const Text('Exit MR Vision Tech?'),
+         content: const Text('Are you sure you want to close the app? Unsaved entries may be lost.'),
+         actions: [
+           TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
+           FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Exit')),
+         ],
+       ),
+     );
+     if (exit == true && mounted) await SystemNavigator.pop();
+   } finally {
+     _exitDialogOpen = false;
+   }
+ }
+
  int tab=0; String search=''; String category='All'; bool lowOnly=false; bool busy=false; int? client;
  List<Map<String,Object?>> products=[],clients=[],sales=[]; final Map<int,int> cart={};
  @override void initState(){super.initState(); refresh();}
@@ -79,7 +103,7 @@ class _HomeState extends State<Home> {
  Widget searchBox()=>TextField(key:ValueKey(tab),onChanged:(s)=>setState(()=>search=s.toLowerCase()),decoration:InputDecoration(prefixIcon:const Icon(Icons.search),hintText:'Search records',filled:true,border:OutlineInputBorder(borderRadius:BorderRadius.circular(18),borderSide:BorderSide.none)));
  List<Widget> records(bool product){final rows=product?products:clients;final filtered=rows.where((r)=>r.values.join(' ').toLowerCase().contains(search)&&(!product||((category=='All'||r['category']==category)&&(!lowOnly||(r['qty'] as int)<=5))));return [heading(product?'Inventory':'Customers',product?'Manage products and stock':'Manage customer relationships'),const SizedBox(height:16),searchBox(),if(product) Wrap(spacing:8,children:[FilterChip(label:const Text('Low stock'),selected:lowOnly,onSelected:(v)=>setState(()=>lowOnly=v)),DropdownButton<String>(value:category,items:{'All',...products.map((r)=>(r['category']??'General').toString()),category}.map((v)=>DropdownMenuItem(value:v,child:Text(v.isEmpty?'Uncategorized':v))).toList(),onChanged:(v)=>setState(()=>category=v??'All'))]),const SizedBox(height:12),FilledButton.icon(onPressed:()=>edit(product),icon:const Icon(Icons.add),label:Text(product?'Add product':'Add customer')),if(filtered.isEmpty)const Padding(padding:EdgeInsets.all(32),child:Center(child:Text('No records found'))),...filtered.map((r)=>Card(elevation:0,child:ListTile(leading:CircleAvatar(child:Icon(product?Icons.inventory_2_outlined:Icons.person_outline)),title:Text('${r['name']}'),subtitle:Text(product?'${r['code']} • ${r['qty']} in stock • ${r['category']??'General'}':'${r['phone']} • ${r['address']}'),onTap:()=>edit(product,r),trailing:product?Column(mainAxisAlignment:MainAxisAlignment.center,children:[Text(money(r['price'] as num)),if((r['qty'] as int)<=5)const Text('LOW STOCK',style:TextStyle(color:Colors.orange,fontSize:10,fontWeight:FontWeight.bold))]):const Icon(Icons.edit_outlined))))];}
  List<Widget> pos()=>[heading('New sale','Select products and review your cart'),const SizedBox(height:16),DropdownButtonFormField<int>(value:client,decoration:const InputDecoration(labelText:'Customer',border:OutlineInputBorder()),items:[const DropdownMenuItem<int>(value:null,child:Text('Walk-in customer')),...clients.map((r)=>DropdownMenuItem<int>(value:r['id'] as int,child:Text('${r['name']}')))],onChanged:busy?null:(v)=>setState(()=>client=v)),const SizedBox(height:12),searchBox(),if(products.isEmpty)TextButton(onPressed:()=>go(1),child:const Text('Add products first')),...products.where((r)=>r.values.join(' ').toLowerCase().contains(search)).map((r){final id=r['id'] as int;final q=cart[id]??0;return Card(elevation:0,child:ListTile(title:Text('${r['name']}'),subtitle:Text('${money(r['price'] as num)} + ${r['gst']}% GST'),trailing:Row(mainAxisSize:MainAxisSize.min,children:[IconButton(onPressed:busy||q==0?null:()=>setState(()=>cart[id]=q-1),icon:const Icon(Icons.remove_circle_outline)),Text('$q'),IconButton(onPressed:busy||q>=(r['qty'] as int)?null:()=>setState(()=>cart[id]=q+1),icon:const Icon(Icons.add_circle))])));}),const SizedBox(height:16),Text('Cart total  ${money(cartTotal)}',style:Theme.of(context).textTheme.titleLarge),FilledButton.icon(onPressed:busy||!cart.values.any((q)=>q>0)?null:checkout,icon:const Icon(Icons.check),label:const Text('Save invoice'))];
- @override Widget build(BuildContext context){final pages=[dashboard,()=>records(true),pos,()=>[heading('Invoices','Search, preview or share invoices'),const SizedBox(height:12),searchBox(),...sales.where((r)=>r.values.join(' ').toLowerCase().contains(search)).map(saleTile)],()=>[heading('Settings','MR Vision Tech'),ListTile(leading:const Icon(Icons.people_outline),title:const Text('Customers'),onTap:()=>go(5)),ListTile(leading:const Icon(Icons.palette_outlined),title:const Text('Appearance & Themes'),onTap:()=>Navigator.of(context).push(MaterialPageRoute<void>(builder:(_)=>ThemePage(settings:widget.settings,save:widget.save)))),ListTile(leading:const Icon(Icons.business),title:const Text('Business & Invoice Settings'),onTap:()=>Navigator.of(context).push(MaterialPageRoute<void>(builder:(_)=>ConfigPage(settings:widget.settings,save:widget.save)))),SwitchListTile(title:const Text('Dark mode'),value:widget.dark,onChanged:(_)=>widget.toggle()),ListTile(leading:const Icon(Icons.info_outline),title:const Text('About ERP'),subtitle:const Text('MR Vision Tech • Offline edition 3.1.0'),onTap:()=>showAboutDialog(context:context,applicationName:'MR Vision Tech',applicationVersion:'3.1.0',applicationIcon:Image.asset('assets/logo.png',width:48),children:[const Text('Developed by MR VisionTech: Rashidur Rahman')]))],()=>records(false)];return Scaffold(appBar:AppBar(backgroundColor:Theme.of(context).colorScheme.primary,foregroundColor:Theme.of(context).colorScheme.onPrimary,title:Row(children:[ClipRRect(borderRadius:BorderRadius.circular(8),child:Image.asset('assets/logo.png',width:40,height:40)),const SizedBox(width:12),const Text('MR Vision Tech',style:TextStyle(fontWeight:FontWeight.bold))]),actions:[IconButton(onPressed:()=>go(5),icon:const Icon(Icons.people_outline),tooltip:'Customers')]),body:SafeArea(child:ListView(key:ValueKey(tab),padding:const EdgeInsets.all(16),children:pages[tab]())),bottomNavigationBar:NavigationBar(selectedIndex:tab==5?4:tab,onDestinationSelected:go,destinations:const [NavigationDestination(icon:Icon(Icons.dashboard_outlined),label:'Home'),NavigationDestination(icon:Icon(Icons.inventory_2_outlined),label:'Stock'),NavigationDestination(icon:Icon(Icons.shopping_cart_outlined),label:'POS'),NavigationDestination(icon:Icon(Icons.receipt_long_outlined),label:'Sales'),NavigationDestination(icon:Icon(Icons.settings_outlined),label:'More')]));}
+ @override Widget build(BuildContext context){final pages=[dashboard,()=>records(true),pos,()=>[heading('Invoices','Search, preview or share invoices'),const SizedBox(height:12),searchBox(),...sales.where((r)=>r.values.join(' ').toLowerCase().contains(search)).map(saleTile)],()=>[heading('Settings','MR Vision Tech'),ListTile(leading:const Icon(Icons.people_outline),title:const Text('Customers'),onTap:()=>go(5)),ListTile(leading:const Icon(Icons.palette_outlined),title:const Text('Appearance & Themes'),onTap:()=>Navigator.of(context).push(MaterialPageRoute<void>(builder:(_)=>ThemePage(settings:widget.settings,save:widget.save)))),ListTile(leading:const Icon(Icons.business),title:const Text('Business & Invoice Settings'),onTap:()=>Navigator.of(context).push(MaterialPageRoute<void>(builder:(_)=>ConfigPage(settings:widget.settings,save:widget.save)))),SwitchListTile(title:const Text('Dark mode'),value:widget.dark,onChanged:(_)=>widget.toggle()),ListTile(leading:const Icon(Icons.info_outline),title:const Text('About ERP'),subtitle:const Text('MR Vision Tech • Offline edition 3.1.0'),onTap:()=>Navigator.of(context).push(MaterialPageRoute<void>(builder:(_)=>const DeveloperAboutPage())))],()=>records(false)];return PopScope<Object?>(canPop:false,onPopInvokedWithResult:(didPop,result){if(!didPop)_confirmExit();},child:Scaffold(appBar:AppBar(backgroundColor:Theme.of(context).colorScheme.primary,foregroundColor:Theme.of(context).colorScheme.onPrimary,title:Row(children:[ClipRRect(borderRadius:BorderRadius.circular(8),child:Image.asset('assets/logo.png',width:40,height:40)),const SizedBox(width:12),const Text('MR Vision Tech',style:TextStyle(fontWeight:FontWeight.bold))]),actions:[IconButton(onPressed:()=>go(5),icon:const Icon(Icons.people_outline),tooltip:'Customers')]),body:SafeArea(child:ListView(key:ValueKey(tab),padding:const EdgeInsets.all(16),children:pages[tab]())),bottomNavigationBar:NavigationBar(selectedIndex:tab==5?4:tab,onDestinationSelected:go,destinations:const [NavigationDestination(icon:Icon(Icons.dashboard_outlined),label:'Home'),NavigationDestination(icon:Icon(Icons.inventory_2_outlined),label:'Stock'),NavigationDestination(icon:Icon(Icons.shopping_cart_outlined),label:'POS'),NavigationDestination(icon:Icon(Icons.receipt_long_outlined),label:'Sales'),NavigationDestination(icon:Icon(Icons.settings_outlined),label:'More')])));}
 }
 
 class _RecordDialog extends StatefulWidget {
@@ -117,4 +141,30 @@ class _ConfigPageState extends State<ConfigPage>{
  @override void initState(){super.initState();cs=keys.map((k)=>TextEditingController(text:widget.settings[k]??(k=='business'?'MR Vision Tech':''))).toList();qr=widget.settings['qr']!='0';}
  @override void dispose(){for(final c in cs){c.dispose();}super.dispose();}
  @override Widget build(BuildContext context)=>Scaffold(appBar:AppBar(title:const Text('Business & Invoice Settings')),body:ListView(padding:const EdgeInsets.all(16),children:[...List.generate(keys.length,(i)=>Padding(padding:const EdgeInsets.only(bottom:12),child:TextField(controller:cs[i],maxLines:i==5?6:1,decoration:InputDecoration(labelText:labels[i],border:const OutlineInputBorder())))),SwitchListTile(title:const Text('Show UPI QR on invoice'),value:qr,onChanged:(v)=>setState(()=>qr=v)),const Text('QR uses invoice total; payment is not verified automatically.'),FilledButton(onPressed:() async {for(var i=0;i<keys.length;i++){await widget.save(keys[i],cs[i].text.trim());}await widget.save('qr',qr?'1':'0');if(context.mounted)Navigator.pop(context);},child:const Text('Save settings'))]));
+}
+
+class DeveloperAboutPage extends StatelessWidget {
+ const DeveloperAboutPage({super.key});
+ @override Widget build(BuildContext context) {
+  final colors=Theme.of(context).colorScheme;
+  return Scaffold(appBar:AppBar(title:const Text('About ERP')),body:SafeArea(child:ListView(padding:const EdgeInsets.all(24),children:[
+   Center(child:CircleAvatar(radius:64,backgroundImage:const AssetImage('assets/developer.jpg'))),
+   const SizedBox(height:16),
+   Text('Rashidur Rahman',textAlign:TextAlign.center,style:Theme.of(context).textTheme.headlineSmall),
+   const Text('Software Developer',textAlign:TextAlign.center),
+   const SizedBox(height:24),
+   Card(child:Column(children:[
+    ListTile(leading:Icon(Icons.phone,color:colors.primary),title:const Text('Mobile'),subtitle:const SelectableText('9153330300')),
+    const Divider(height:1),
+    ListTile(leading:Icon(Icons.email_outlined,color:colors.primary),title:const Text('Email'),subtitle:const SelectableText('me@rashidur.com')),
+   ])),
+   const SizedBox(height:24),
+   Center(child:Image.asset('assets/logo.png',width:64,height:64)),
+   const SizedBox(height:8),
+   const Text('MR Vision Tech • Offline Edition 3.1.0',textAlign:TextAlign.center),
+   const SizedBox(height:12),
+   const Text('Developed by MR VisionTech: Rashidur Rahman',textAlign:TextAlign.center),
+   const Text('© 2026 MR Vision Tech',textAlign:TextAlign.center),
+  ])));
+ }
 }
