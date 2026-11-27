@@ -27,6 +27,9 @@ jobs:
           if [ ! -d android ]; then
             flutter create --platforms=android --project-name mr_vision_tech .
           fi
+      - name: Set Android App Name
+        run: |
+          sed -i 's/android:label="[^"]*"/android:label="MR VisionTech"/' android/app/src/main/AndroidManifest.xml
       - name: Install dependencies
         run: flutter pub get
       - name: Generate Launcher Icon
